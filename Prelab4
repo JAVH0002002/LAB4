@@ -1,0 +1,138 @@
+#include <avr/io.h>
+#include <util/delay.h>
+
+#define F_CPU 16000000UL // Frecuencia del microcontrolador (16MHz)
+#define BTN_INC_PIN   PINC3  // Pin para el botón de incremento
+#define BTN_DEC_PIN   PINC4  // Pin para el botón de decremento
+#define LED_PORT      PORTB   // Puerto para los LEDs
+#define LED_MASK      0b00111111 // Máscara para los LEDs (puerto B0-B5)
+
+// Función para inicializar el ADC
+void ADC_Init() {
+	ADMUX |= (1 << REFS0); // Selecciona AVCC como referencia de voltaje
+	ADCSRA |= (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // Habilita el ADC y establece el pre-escalador en 128
+}
+
+// Función para leer el valor del potenciómetro
+uint16_t ADC_Read(uint8_t adc_channel) {
+	ADMUX = (ADMUX & 0xF0) | (adc_channel & 0x0F); // Selecciona el canal de ADC
+	ADCSRA |= (1 << ADSC); // Inicia la conversión
+	while (ADCSRA & (1 << ADSC)); // Espera a que la conversión termine
+	return ADC; // Devuelve el valor del ADC
+}
+
+// Tabla de segmentos para mostrar números en el display de 7 segmentos
+const uint8_t digitos[] = {
+	0b00111111, // 0
+	0b00000110, // 1
+	0b01011011, // 2
+	0b01001111, // 3
+	0b01100110, // 4
+	0b01101101, // 5
+	0b01111101, // 6
+	0b00000111, // 7
+	0b01111111, // 8
+	0b01101111  // 9
+};
+
+// Función para mostrar un dígito en el display de 7 segmentos
+void Mostrar_Digito(uint8_t digito, uint8_t display) {
+	if (display == 1) {
+		PORTC |= (1 << PC1); // Habilita el primer display
+		PORTD = digitos[digito]; // Muestra el dígito en el primer display
+		PORTC &= ~(1 << PC2); // Deshabilita el segundo display
+		} else if (display == 2) {
+		PORTC |= (1 << PC2); // Habilita el segundo display
+		PORTD = digitos[digito]; // Muestra el dígito en el segundo display
+		PORTC &= ~(1 << PC1); // Deshabilita el primer display
+	}
+}
+
+void initIO() {
+	// Configura los pines de los botones como entrada
+	DDRC &= ~((1 << BTN_INC_PIN) | (1 << BTN_DEC_PIN));
+	// Habilita las resistencias de pull-up internas para los botones
+	PORTC |= (1 << BTN_INC_PIN) | (1 << BTN_DEC_PIN);
+	// Configura los pines de los LEDs como salida
+	DDRB |= LED_MASK;
+	// Configura el pin de LED en el puerto D como salida
+	DDRD |= (1 << PD7);
+	// Configura el pin de LED en el puerto C como salida
+	DDRC |= (1 << PC5);
+}
+
+int main(void) {
+	// Configurar puerto B para los pines selectores de los displays
+	DDRC |= (1 << PC1) | (1 << PC2); // PC1 y PC2 como salidas
+
+	// Configurar puerto D para los LEDs de los displays de 7 segmentos
+	DDRD = 0xFF; // PD0-PD7 como salidas para los LEDs de los displays
+
+	ADC_Init(); // Inicializar el ADC
+	initIO();   // Inicializar la E/S
+
+	uint16_t valor_ADC;
+	uint8_t digito1, digito2;
+	uint8_t contador = 0;
+	uint8_t inc_state = 0; // Estado del botón de incremento
+	uint8_t dec_state = 0; // Estado del botón de decremento
+
+	while (1) {
+		// Actualiza el estado del botón de incremento
+		if (!(PINC & (1 << BTN_INC_PIN))) {
+			if (inc_state == 0) {
+				inc_state = 1;
+				contador++;
+			}
+			} else {
+			inc_state = 0;
+		}
+
+		// Actualiza el estado del botón de decremento
+		if (!(PINC & (1 << BTN_DEC_PIN))) {
+			if (dec_state == 0) {
+				dec_state = 1;
+				contador--;
+			}
+			} else {
+			dec_state = 0;
+		}
+
+		// Limita el contador al rango de 0 a 255 (8 bits)
+		if (contador > 255)
+		contador = 0;
+		else if (contador < 0)
+		contador = 255;
+
+		// Actualiza los LEDs según el valor del contador
+		LED_PORT = (LED_PORT & ~LED_MASK) | (contador & LED_MASK);
+		// Actualiza el LED en el pin PD7
+		if (contador & (1 << 6))
+		PORTD |= (1 << PD7);
+		else
+		PORTD &= ~(1 << PD7);
+		// Actualiza el LED en el pin PC5
+		if (contador & (1 << 7))
+		PORTC |= (1 << PC5);
+		else
+		PORTC &= ~(1 << PC5);
+
+		// Leer valor del potenciómetro conectado al pin A0
+		valor_ADC = ADC_Read(0);
+
+		// Convertir el valor ADC a voltaje (asumiendo una referencia de 5V)
+		float voltaje = (valor_ADC * 5.0) / 1023.0;
+
+		// Separar el voltaje en dígitos
+		digito1 = voltaje;
+		digito2 = (voltaje * 10) - (digito1 * 10);
+
+		// Mostrar los dígitos en los displays de 7 segmentos
+		Mostrar_Digito(digito1, 1); // Mostrar el primer dígito en el primer display
+		_delay_ms(5); // Pequeña pausa para evitar el parpadeo
+		Mostrar_Digito(digito2, 2); // Mostrar el segundo dígito en el segundo display
+		_delay_ms(5); // Pequeña pausa para evitar el parpadeo
+	}
+
+	return 0;
+}
