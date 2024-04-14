@@ -1,0 +1,135 @@
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+
+// Definiciones de los pines
+#define BTN_INC_PIN   PINC3  // Pin para el botón de incremento
+#define BTN_DEC_PIN   PINC4  // Pin para el botón de decremento
+#define LED_PORT      PORTB   // Puerto para los LEDs
+#define LED_MASK      0b00111111 // Máscara para los LEDs (puerto B0-B5)
+
+#define POT_PIN PC0
+#define DISP_SEL1 PC1
+#define DISP_SEL2 PC2
+
+// Definiciones de los segmentos del display
+const uint8_t SEGMENTOS[16] = {
+	0b00111111, // 0
+	0b00000110, // 1
+	0b01011011, // 2
+	0b01001111, // 3
+	0b01100110, // 4
+	0b01101101, // 5
+	0b01111101, // 6
+	0b00000111, // 7
+	0b01111111, // 8
+	0b01101111, // 9
+	0b01110111, // A
+	0b01111100, // B
+	0b00111001, // C
+	0b01011110, // D
+	0b01111001, // E
+	0b01110001  // F
+};
+
+// Función para mostrar un dígito en un display de 7 segmentos
+void mostrarDigito(uint8_t digito, uint8_t display) {
+	PORTD = SEGMENTOS[digito];
+	if (display == 1) {
+		PORTC |= (1 << DISP_SEL1);
+		PORTC &= ~(1 << DISP_SEL2);
+		} else {
+		PORTC |= (1 << DISP_SEL2);
+		PORTC &= ~(1 << DISP_SEL1);
+	}
+}
+
+void initIO() {
+	// Configura los pines de los botones como entrada
+	DDRC &= ~((1 << BTN_INC_PIN) | (1 << BTN_DEC_PIN));
+	// Habilita las resistencias de pull-up internas para los botones
+	PORTC |= (1 << BTN_INC_PIN) | (1 << BTN_DEC_PIN);
+	// Configura los pines de los LEDs como salida
+	DDRB |= LED_MASK;
+	// Configura el pin de LED en el puerto D como salida (PD7)
+	DDRD |= (1 << PD7);
+	// Configura el pin de LED en el puerto C como salida (PC5)
+	DDRC |= (1 << PC5);
+	
+}
+
+int main(void) {
+	uint8_t contador = 0;
+	uint8_t inc_state = 0; // Estado del botón de incremento
+	uint8_t dec_state = 0; // Estado del botón de decremento
+	
+	initIO();
+	
+	// Configuración de los pines
+	DDRC &= ~(1 << POT_PIN); // Configurar PC0 como entrada (potenciómetro)
+	DDRD = 0b01111111;       // Configurar pines PD0 a PD6 como salidas (display)
+	DDRC |= (1 << DISP_SEL1) | (1 << DISP_SEL2); // Configurar PC1 y PC2 como salidas (selector de display)
+
+	// Configuración del conversor analógico digital (ADC)
+	ADMUX |= (1 << REFS0);    // Voltaje de referencia AVCC con capacitor externo en AREF pin
+	ADCSRA |= (1 << ADEN);    // Habilitar ADC
+	ADCSRA |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); // Divisor de frecuencia del reloj de ADC en 128
+
+	while (1) {
+		// Actualiza el estado del botón de incremento
+		if (!(PINC & (1 << BTN_INC_PIN))) {
+			if (inc_state == 0) {
+				inc_state = 1;
+				contador++;
+			}
+			} else {
+			inc_state = 0;
+		}
+
+		// Actualiza el estado del botón de decremento
+		if (!(PINC & (1 << BTN_DEC_PIN))) {
+			if (dec_state == 0) {
+				dec_state = 1;
+				contador--;
+			}
+			} else {
+			dec_state = 0;
+		}
+
+		// Limita el contador al rango de 0 a 255 (8 bits)
+		if (contador > 255)
+		contador = 0;
+		else if (contador < 0)
+		contador = 255;
+
+			// Leer valor del potenciómetro
+			ADCSRA |= (1 << ADSC);      // Iniciar conversión
+			while (ADCSRA & (1 << ADSC)) {} // Esperar a que termine la conversión
+			uint8_t valor = ADC >> 2;       // Leer el valor del ADC (8 bits) y ajustar al rango de 0 a 255
+
+			// Mostrar valor en los displays
+			mostrarDigito(valor >> 4, 1);   // Mostrar el dígito más significativo
+			_delay_ms(5);                   // Pequeño retardo para evitar el parpadeo
+			mostrarDigito(valor & 0x0F, 2); // Mostrar el dígito menos significativo
+			_delay_ms(5);                   // Pequeño retardo para evitar el parpadeo
+			
+		// Actualiza los LEDs según el valor del contador
+		LED_PORT = (LED_PORT & ~LED_MASK) | (contador & LED_MASK);
+
+		// Actualiza el LED en el pin PD7
+		if (contador & (1 << 6))
+		PORTD |= (1 << PD7);
+		else
+		PORTD &= ~(1 << PD7);
+
+		// Actualiza el LED en el pin PC5
+		if (contador & (1 << 7))
+		PORTC |= (1 << PC5);
+		else
+		PORTC &= ~(1 << PC5);
+
+		_delay_ms(50); // Pequeño retardo para evitar rebotes adicionales
+	}
+
+	return 0;
+}
